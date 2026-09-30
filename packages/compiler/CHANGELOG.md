@@ -1,5 +1,11 @@
 # @solidjs/compiler
 
+## 2.0.0-rc.14
+
+### Patch Changes
+
+- 3c1f809: Preserve `/* istanbul ignore … */` and `/* c8 ignore … */` block comments written as JSX children on the generated component `children` getter. Line comments are not carried.
+
 ## 2.0.0-rc.13
 
 ## 2.0.0-rc.12

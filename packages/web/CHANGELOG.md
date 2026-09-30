@@ -1,5 +1,22 @@
 # @solidjs/web
 
+## 2.0.0-rc.14
+
+### Patch Changes
+
+- ecb68a1: Binding slots: the fill runs once per occurrence, untracked, under the occurrence's owner — as a component body and a template-slot fill do. State created in the fill lives as long as the occurrence; a top-level read is a one-time read (dev: `STRICT_READ_UNTRACKED`, naming the fill); getters are the reactive form. Handlers and refs are read once when an element binds and go through `assign`, so events delegate, tuples bind and interactions wrap as in client JSX. On the server an array at a handler position is a dev finding (reason `tuple`) instead of being flattened; only `ref` merges arrays. Template-slot fills are untracked on every render path and carry the same labelled warning.
+
+  Breaking: `AttributeSlot` is renamed `BindingSlot`, with no alias, and its return is constrained (`SlotOutput<J>` / `SlotError<M>`, both exported) so an array, DOM node, function, async value or `$`-prefixed key is a type error on both sides. The diagnostic code `ATTRIBUTE_SLOT_POSITION` is renamed `BINDING_SLOT_POSITION`. The fill-shape finding also names async values.
+
+- d4b10b5: Binding slots: a slot property placed as a child (`<strong>{list.remaining}</strong> items left`) is a text position. The server emits a comment pair around it, `<!--_s:t=<occurrence>:<key>-->…<!--/_s:t-->`, with the escaped t=0 value inside on the document face and nothing on the stream face; the client writes the text between the markers from the occurrence's render effect, and a refetch's morph keeps the client's text. Strings and numbers render; nullish and booleans render empty, as a client insert renders them. Any other value is a new client dev finding (`BINDING_SLOT_POSITION`, reason `text-shape`) and clears. The content of `<textarea>`, `<title>`, `<style>` and `<script>` is not a text position (a comment is literal text there); bind `value=` or a style property instead.
+
+  Breaking: a slot property as a child used to render nothing and raise the `text` finding; it now renders and binds, and the `text` reason is retired.
+
+- 2656284: `createSSRResponse` no longer hangs when a streamed render ends before its shell flushes (#3719). A render that fails pre-shell (`onError` hears `handling: "failed"`) or is aborted through its `signal` now resolves with a bodyless 500, or a redirect when a `Location` is already on the response stub, and the stub is committed. A render that succeeds with an empty document resolves with an empty 200. The promise still never rejects.
+- 8d66ae5: Server bundles that don't serialize no longer retain the serializer's plugin set. Five module-level statements that Rollup shakes but Rolldown (Vite) and esbuild keep are now side-effect free to every bundler: the frozen `DEFAULT_WEB_PLUGINS` array is `/* @__PURE__ */`-annotated, seroval `Feature` flags are read on use, the stub gap-fill header set is built on first use, the event-stream heartbeat's `new TextEncoder()` is annotated (and no longer built at import time by `dist/server.js`), and the flash-cookie matcher is a regex literal. A server bundle importing only `isServer` or `getRequestEvent` drops from ~11.7 KB to ~1.6 KB minified (seroval bundled; Rolldown), and `renderToString` bundles shed ~260–380 B. No behavior or API change.
+- Updated dependencies [da84bd9]
+  - solid-js@2.0.0-rc.14
+
 ## 2.0.0-rc.13
 
 ### Patch Changes

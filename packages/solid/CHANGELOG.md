@@ -1,5 +1,14 @@
 # solid-js
 
+## 2.0.0-rc.14
+
+### Patch Changes
+
+- da84bd9: Fix hydration adoption throwing when a traced compute calls `Promise.withResolvers()` or `Promise.try()`. The trace run swaps the global `Promise` for a never-settling mock that lacked these two statics, so the call threw out of hydration instead of adopting the server value. The mock now provides both: `withResolvers` returns a never-settling mock with no-op `resolve`/`reject`, and `try` returns a never-settling mock without invoking its callback (matching how the mock's constructor ignores its executor).
+- Updated dependencies [ecb68a1]
+- Updated dependencies [b0c8489]
+  - @solidjs/signals@2.0.0-rc.14
+
 ## 2.0.0-rc.13
 
 ### Patch Changes
