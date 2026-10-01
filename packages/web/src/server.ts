@@ -2383,6 +2383,16 @@ export function renderToStream(code, options = {}) {
   // flushing proceed normally around them.
   let holds = 0;
   const flushEnd = () => {
+    // A drained serializer is what tells the render it is finished: seroval's
+    // onDone runs doShell() and then disposes the root. The boundary paths
+    // (a fragment's resolve, a hold's release) reach here while the shell can
+    // still have unresolved root holes; flushing then disposes the owner of a
+    // memo whose retry is parked on a pending promise (`comp.disposed` turns
+    // the retry into a no-op), the memo re-throws its cached NotReadyError,
+    // and the flush loop re-pulls the same hole forever on microtasks — 100%
+    // CPU, the event loop never yields. Deferring loses nothing: every
+    // consumer calls flushEnd() again once resolveRootHoles() reports done.
+    if (rootHoles && !shellCompleted) return;
     if (!registry.size && !holds) {
       serializeRootAssets();
       queue(() =>
