@@ -66,7 +66,12 @@ export default function reconcileArrays(parentNode: any, a: any[], b: any[], mar
 
       while (bStart < bEnd) {
         const n = b[bStart++];
-        parentNode.insertBefore(n, node);
+        // The anchor can be the run's own first node (a slot whose first
+        // value was a prefix of nodes already in place, e.g. after
+        // hydration): insertBefore(n, n) is a no-op, but every later node
+        // would land before it. Step the anchor past a node already there.
+        if (n === node) node = n.nextSibling;
+        else parentNode.insertBefore(n, node);
         if (marker) n[$$SLOT] = marker;
       }
       // remove
