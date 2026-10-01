@@ -1,0 +1,31 @@
+.changeset/web-reconcile-self-anchored-run.md
+  s_b15c8bc521b310::t_6a2461a2fe4e0e 1-5
+packages/web/src/reconcile.ts
+  s_b15c8bc521b310::t_0658b7e2f0e19d 69-74
+packages/web/test/reconcile-self-anchored-run.spec.tsx
+  s_76da86ba3fdd33::t_db3693637ef10c 1-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "fd9af0719f05d5f736b0ebfa55002f445a0c0870",
+  "prompts": {},
+  "sessions": {
+    "s_76da86ba3fdd33": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c50a8b99-cf37-4234-acb9-e64979a8e207",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Rómulo Ochoa Valez <romulovalez@gmail.com>"
+    },
+    "s_b15c8bc521b310": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "23863e94-2871-46ba-b352-c8c7cd177ed3",
+        "model": "unknown"
+      },
+      "human_author": "Rómulo Ochoa Valez <romulovalez@gmail.com>"
+    }
+  }
+}
