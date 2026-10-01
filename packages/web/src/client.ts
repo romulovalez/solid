@@ -1413,7 +1413,21 @@ export function insert(parent, accessor, marker, initial, options) {
   const multi = marker !== undefined;
   const host = options && options.host;
   if (multi && !initial) initial = [];
-  if (hydrationRt !== null) initial = hydrationRt.claimInitial(parent, multi, initial);
+  // A sole reactive hole claims its parent's children only when its first
+  // value needs them (an array, an empty value, a function): a text or node
+  // value never reads them, and the claim allocates.
+  let lazyClaim = false;
+  if (hydrationRt !== null) {
+    if (
+      !multi &&
+      initial === undefined &&
+      parent &&
+      typeof accessor === "function" &&
+      isHydrating(parent)
+    )
+      lazyClaim = true;
+    else initial = hydrationRt.claimInitial(parent, multi, initial);
+  }
   if (typeof accessor !== "function") {
     accessor = normalize(accessor, initial, multi, true);
     if (typeof accessor !== "function") {
@@ -1430,7 +1444,8 @@ export function insert(parent, accessor, marker, initial, options) {
   let current = initial;
   effect(
     prev => {
-      if (hydrationRt !== null) current = hydrationRt.reclaimRegion(current, parent, marker);
+      if (hydrationRt !== null && !lazyClaim)
+        current = hydrationRt.reclaimRegion(current, parent, marker);
       // Dev: bracket an unscoped accessor's evaluation while hydrating — a
       // scoped one owns its ids; this effect is transparent, so anything an
       // unscoped one builds takes ids from the enclosing counter, and a key
@@ -1438,7 +1453,17 @@ export function insert(parent, accessor, marker, initial, options) {
       // inner effect below, whose synchronous first compute unwraps an
       // accessor that returned a function (one report per site).
       const devNext = "_SOLID_DEV_" ? unscopedHoleSnapshot(accessor, parent) : undefined;
-      const value = normalize(accessor(), current, multi, true);
+      const raw = accessor();
+      if (lazyClaim) {
+        lazyClaim = false;
+        const t = typeof raw;
+        if (
+          !(t === "string" || t === "number" || (raw != null && raw.nodeType)) &&
+          isHydrating(parent)
+        )
+          current = claimChildNodes(parent);
+      }
+      const value = normalize(raw, current, multi, true);
       if ("_SOLID_DEV_") checkUnscopedHole(devNext, accessor, parent);
       if (typeof value !== "function") return value;
       effect(
