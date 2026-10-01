@@ -1,4 +1,4 @@
-import { untrack, createMemo } from "@solidjs/signals";
+import { untrack, createMemo, probeAbort, setSite, siteComp, siteNext } from "@solidjs/signals";
 import { IS_DEV, IS_OBSERVE, observedComponent } from "../client/core.js";
 import { _lazyHydrationLookup, sharedConfig } from "./hydration.js";
 import type { Element as SolidElement } from "../types.js";
@@ -82,8 +82,19 @@ export function createComponent<T extends Record<string, any>>(
   props: T,
   name?: string
 ): SolidElement {
-  if (IS_OBSERVE) return observedComponent(Comp, props || ({} as T), name);
-  return untrack(() => Comp(props || ({} as T)));
+  // Under a static-binding probe the binding is not static: bail before the
+  // body runs (the probe's verdict discards whatever is returned).
+  if (probeAbort()) return undefined;
+  // Binding sites are counted per component body. No try/finally: a throw
+  // leaves a stale site, which only costs the site heuristic a probe.
+  const outerComp = siteComp,
+    outerNext = siteNext;
+  setSite(Comp, 0);
+  const out = IS_OBSERVE
+    ? observedComponent(Comp, props || ({} as T), name)
+    : untrack(() => Comp(props || ({} as T)));
+  setSite(outerComp, outerNext);
+  return out;
 }
 
 /**

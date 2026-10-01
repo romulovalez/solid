@@ -15,11 +15,13 @@ import {
   createEffectNode,
   enterCallback,
   exitCallback,
+  read,
   recompute,
   setStrictRead,
   staleValues,
   ext,
-  setEffectStatusNotify
+  setEffectStatusNotify,
+  takeAdoptable
 } from "./core.js";
 import { attrHooks } from "./attribution-hooks.js";
 import { emitDiagnostic, reportDiagnostic } from "./dev.js";
@@ -56,6 +58,27 @@ export interface Effect<T> extends Computed<T>, Owner {
 }
 
 /**
+ * The first pass of an effect that replaces a static probe (core.ts
+ * `probeStatic`) which ran the same pass and recorded its tracked reads:
+ * re-reading them subscribes the effect, and while every value is unchanged
+ * the probe's value is the pass's value, so the user's compute does not run
+ * twice.
+ */
+function adoptProbe<T>(node: Effect<T>, adopt: unknown[]): void {
+  const pass = node._fn!;
+  node._fn = (prev: T | undefined) => {
+    for (let k = 0; k < adopt.length - 2; k += 2)
+      if (read(adopt[k] as Computed<unknown>) !== adopt[k + 1]) return pass(prev);
+    return adopt[adopt.length - 2] as T;
+  };
+  try {
+    recompute(node, true);
+  } finally {
+    node._fn = pass;
+  }
+}
+
+/**
  * Effects are the leaf nodes of our reactive graph. When their sources change, they are
  * automatically added to the queue of effects to re-execute, which will cause them to fetch their
  * sources and recompute
@@ -74,7 +97,9 @@ export function effect<T>(
     isUser ? EFFECT_USER : EFFECT_RENDER,
     options
   ) as Effect<T>;
-  recompute(node, true);
+  const adopt = takeAdoptable();
+  if (adopt === null || adopt[adopt.length - 1] !== node._parent) recompute(node, true);
+  else adoptProbe(node, adopt);
   // A first pass that derived from a live transaction's staged world was
   // staged into that transaction (recompute: born held); the transaction's
   // commit replays this effect. Its first run is not this creation's (A29).

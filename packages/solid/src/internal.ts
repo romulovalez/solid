@@ -51,6 +51,16 @@ export {
   SOURCE_MERGE,
   type SourceKind
 } from "@solidjs/signals";
+// The static-binding probe (see `probeStatic` in @solidjs/signals), for the
+// renderers' binding effects.
+export {
+  NOT_STATIC,
+  probeStatic,
+  takeAdoptable,
+  probeAbort,
+  bindingSite,
+  siteFlags
+} from "@solidjs/signals";
 
 /**
  * Server: a thrown `NotReadyError` becomes the promise to wait on (or, with

@@ -10,6 +10,10 @@
  * `spread(el, [a, () => b, c], skipChildren, skip)` unions own keys with
  * later sources winning, reads only the winner, calls function sources
  * inline (no memo, no hydration id) and honors a `skip` predicate.
+ *
+ * A binding whose first pass reads nothing reactive gets no node at all (the
+ * static-binding elision, `probeStatic` in @solidjs/signals), so the counts
+ * below are of the bindings that read a signal.
  */
 import { describe, expect, test, vi } from "vitest";
 import { render, spread } from "@solidjs/web";
@@ -52,7 +56,7 @@ describe("reactive node count per element", () => {
         return title();
       },
       get children() {
-        return "text";
+        return title() + "-text";
       }
     };
     expect(spreadNodes(() => props)).toBe(2);
@@ -69,7 +73,8 @@ describe("reactive node count per element", () => {
     };
     expect(spreadNodes(() => props)).toBe(1);
     expect(spreadNodes(() => props, true)).toBe(1);
-    expect(spreadNodes(() => ({ ...props, children: "x" }), true)).toBe(1);
+    // The object spread read the getter: a static title, so no node.
+    expect(spreadNodes(() => ({ ...props, children: "x" }), true)).toBe(0);
   });
 
   test("a ref adds no node", () => {
@@ -84,26 +89,29 @@ describe("reactive node count per element", () => {
   });
 
   test("plain data children insert with no effect", () => {
-    expect(spreadNodes(() => ({ title: "a", children: "static" }))).toBe(1);
-    expect(spreadNodes(() => ({ title: "a", children: document.createElement("b") }))).toBe(1);
+    // …and static attributes get none either.
+    expect(spreadNodes(() => ({ title: "a", children: "static" }))).toBe(0);
+    expect(spreadNodes(() => ({ title: "a", children: document.createElement("b") }))).toBe(0);
   });
 
   test("…and so do data children behind merge/omit views over plain objects", () => {
     // The Kobalte shape: `<Tag {...omit(props, "as")}>` where the caller
     // wrote static children. The view's descriptor trap reports the leaf's
     // data property, so no children effect is created (#3388, #3448).
+    // The attributes are static too, so nothing gets a node.
     const props = { as: "a", title: "a", children: "static" };
-    expect(spreadNodes(() => omit(props, "as"))).toBe(1);
-    expect(spreadNodes(() => merge({ role: "button" }, omit(props, "as")))).toBe(1);
-    expect(spreadNodes(() => omit(merge({ role: "button" }, props), "as"))).toBe(1);
-    // a getter behind the same layers still gets its effect
+    expect(spreadNodes(() => omit(props, "as"))).toBe(0);
+    expect(spreadNodes(() => merge({ role: "button" }, omit(props, "as")))).toBe(0);
+    expect(spreadNodes(() => omit(merge({ role: "button" }, props), "as"))).toBe(0);
+    // a getter behind the same layers still gets its effect when it reads a signal
+    const [text] = createSignal("text");
     const reactive = {
       as: "a",
       get children() {
-        return "text";
+        return text();
       }
     };
-    expect(spreadNodes(() => omit(merge({ role: "button" }, reactive), "as"))).toBe(2);
+    expect(spreadNodes(() => omit(merge({ role: "button" }, reactive), "as"))).toBe(1);
     // a store leaf can grow a `children` key later: reactive path
     const [store] = createStore<{ title: string; children?: string }>({ title: "a" });
     expect(spreadNodes(() => merge({ role: "button" }, store))).toBe(2);

@@ -21,6 +21,7 @@ import {
 } from "solid-js";
 import type { ClientErrorHook } from "solid-js";
 import {
+  probeAbort,
   sharedConfig,
   viewOf,
   OmitView,
@@ -34,7 +35,7 @@ import {
   SOURCE_PROXY,
   SOURCE_MEMO
 } from "solid-js/internal";
-import { effect, memo, setSpreadName, spreadName, tagElement } from "./render.js";
+import { effect, memo, renderEffect, setSpreadName, spreadName, tagElement } from "./render.js";
 
 import { JSX } from "../jsx/jsx.js";
 
@@ -375,7 +376,7 @@ export function render(code, element, init, options = {}) {
         if (options.onError) getOwner()[ROOT_ERROR_HOOK] = options.onError;
         if (element === document) {
           const tree = code();
-          effect(
+          renderEffect(
             () => flatten(tree),
             () => {}
           );
@@ -1412,7 +1413,21 @@ export function insert(parent, accessor, marker, initial, options) {
   const multi = marker !== undefined;
   const host = options && options.host;
   if (multi && !initial) initial = [];
-  if (hydrationRt !== null) initial = hydrationRt.claimInitial(parent, multi, initial);
+  // A sole reactive hole claims its parent's children only when its first
+  // value needs them (an array, an empty value, a function): a text or node
+  // value never reads them, and the claim allocates.
+  let lazyClaim = false;
+  if (hydrationRt !== null) {
+    if (
+      !multi &&
+      initial === undefined &&
+      parent &&
+      typeof accessor === "function" &&
+      isHydrating(parent)
+    )
+      lazyClaim = true;
+    else initial = hydrationRt.claimInitial(parent, multi, initial);
+  }
   if (typeof accessor !== "function") {
     accessor = normalize(accessor, initial, multi, true);
     if (typeof accessor !== "function") {
@@ -1429,7 +1444,8 @@ export function insert(parent, accessor, marker, initial, options) {
   let current = initial;
   effect(
     prev => {
-      if (hydrationRt !== null) current = hydrationRt.reclaimRegion(current, parent, marker);
+      if (hydrationRt !== null && !lazyClaim)
+        current = hydrationRt.reclaimRegion(current, parent, marker);
       // Dev: bracket an unscoped accessor's evaluation while hydrating — a
       // scoped one owns its ids; this effect is transparent, so anything an
       // unscoped one builds takes ids from the enclosing counter, and a key
@@ -1437,7 +1453,17 @@ export function insert(parent, accessor, marker, initial, options) {
       // inner effect below, whose synchronous first compute unwraps an
       // accessor that returned a function (one report per site).
       const devNext = "_SOLID_DEV_" ? unscopedHoleSnapshot(accessor, parent) : undefined;
-      const value = normalize(accessor(), current, multi, true);
+      const raw = accessor();
+      if (lazyClaim) {
+        lazyClaim = false;
+        const t = typeof raw;
+        if (
+          !(t === "string" || t === "number" || (raw != null && raw.nodeType)) &&
+          isHydrating(parent)
+        )
+          current = claimChildNodes(parent);
+      }
+      const value = normalize(raw, current, multi, true);
       if ("_SOLID_DEV_") checkUnscopedHole(devNext, accessor, parent);
       if (typeof value !== "function") return value;
       effect(
@@ -2004,7 +2030,7 @@ function gateHeadResource(props) {
     (attrs || (attrs = {}))[name] = v === true ? "" : String(v);
   }
   if (attrs) descriptor.attrs = attrs;
-  effect(
+  renderEffect(
     () => {
       const entry = warmAsset(descriptor);
       // Settledness is checked here, not inside the seam: a loaded (or
@@ -2051,7 +2077,7 @@ export function useHead(tags) {
   initHeadRegistry();
   const reg = { seq: -1, tags: null };
   const uid = ++headUid;
-  effect(
+  renderEffect(
     () => {
       let list = typeof tags === "function" ? tags() : tags;
       if (!Array.isArray(list)) list = [list];
@@ -2331,6 +2357,9 @@ export function getNextElement(template) {
   let node,
     key,
     hydrating = isHydrating();
+  // Under a static-binding probe a claim would consume a hydration key the
+  // real effect needs: abort the probe and hand it a throwaway clone.
+  if (hydrating && template && probeAbort()) return template(true);
   if (!hydrating || !(node = sharedConfig.registry.get((key = getHydrationKey())))) {
     if (!template) {
       throw new Error(`Hydration Mismatch. Unable to find DOM nodes for hydration key: ${key}`);

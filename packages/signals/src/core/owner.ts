@@ -19,7 +19,9 @@ import {
   PRIMITIVE_IN_FORBIDDEN_SCOPE_MESSAGE,
   runWithOwner,
   tracking,
-  ext
+  ext,
+  probeObserver,
+  PROBE_ABORT
 } from "./core.js";
 import {
   assertInvariant,
@@ -196,6 +198,7 @@ export function disposeChildren(node: Owner, self: boolean = false, zombie?: boo
 }
 
 export function linkChild(parent: Owner, node: Owner): void {
+  if (parent === probeObserver) throw PROBE_ABORT;
   const head = parent._firstChild;
   node._prevSibling = null;
   node._nextSibling = head;
@@ -235,6 +238,7 @@ function runDisposal(node: Owner, zombie?: boolean): void {
 }
 
 function childId(owner: Owner, consume: boolean): string {
+  if (consume && owner === probeObserver) throw PROBE_ABORT;
   let counter: Owner = owner;
   while (counter._config & CONFIG_TRANSPARENT && counter._parent) counter = counter._parent;
   if (counter.id != null)
@@ -333,6 +337,7 @@ export function getOwner(): Owner | null {
  */
 export function cleanup(fn: Disposable): Disposable {
   if (!context) return fn;
+  if (context === probeObserver) throw PROBE_ABORT;
   if (!context._disposal) context._disposal = fn;
   else if (Array.isArray(context._disposal)) context._disposal.push(fn);
   else context._disposal = [context._disposal, fn];
@@ -361,6 +366,51 @@ export function isDisposed(node: Owner): boolean {
 
 function disposeRootSelf(this: Root, self: boolean = true): void {
   disposeChildren(this, self);
+}
+
+/**
+ * The throwaway observer a static probe (core.ts `probeStatic`) runs a pass
+ * under. It has createOwner's exact shape (same keys, same order) so call
+ * sites that read the current owner stay monomorphic, and it is never linked
+ * into the tree: transparent, sharing `parent`'s id and context.
+ *
+ * @internal
+ */
+export function createProbeOwner(parent: Owner): Root {
+  return __OBSERVE__
+    ? ({
+        id: parent.id,
+        _config: CONFIG_TRANSPARENT,
+        _root: false,
+        _parentComputed: null,
+        _firstChild: null,
+        _nextSibling: null,
+        _prevSibling: null,
+        _disposal: null,
+        _queue: parent._queue ?? globalQueue,
+        _context: parent._context || defaultContext,
+        _childCount: 0,
+        _x: null,
+        _parent: parent,
+        dispose: disposeRootSelf,
+        _name: undefined as string | undefined
+      } as unknown as Root)
+    : ({
+        id: parent.id,
+        _config: CONFIG_TRANSPARENT,
+        _root: false,
+        _parentComputed: null,
+        _firstChild: null,
+        _nextSibling: null,
+        _prevSibling: null,
+        _disposal: null,
+        _queue: parent._queue ?? globalQueue,
+        _context: parent._context || defaultContext,
+        _childCount: 0,
+        _x: null,
+        _parent: parent,
+        dispose: disposeRootSelf
+      } as unknown as Root);
 }
 
 /**

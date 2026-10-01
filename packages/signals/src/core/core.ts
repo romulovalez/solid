@@ -88,7 +88,16 @@ import {
 } from "./dev.js";
 import { attrHooks } from "./attribution-hooks.js";
 import { devTrackHeldPending, devUntrackCompanionOwner } from "./invariants.js";
-import { cleanup, disposeChildren, inheritId, linkChild, markDisposal } from "./owner.js";
+import {
+  cleanup,
+  createProbeOwner,
+  disposeChildren,
+  getNextChildId,
+  inheritId,
+  linkChild,
+  markDisposal,
+  peekNextChildId
+} from "./owner.js";
 import type { IQueue, Transition } from "./scheduler.js";
 import {
   notifyEpoch,
@@ -109,6 +118,7 @@ import {
   heldTrims,
   runInTransition,
   schedule,
+  transitions,
   wakeParked,
   zombieQueue
 } from "./scheduler.js";
@@ -2073,6 +2083,7 @@ export function readNodeFast<T>(el: Signal<T>): T | typeof READ_SLOW {
     return READ_SLOW;
   let c = context;
   if ((c as Root)?._root) c = (c as Root)._parentComputed;
+  if (c !== null && c === probeObserver) return READ_SLOW;
   if (c && tracking) link(el, c as Computed<any>);
   // Children-forbidden readers (createTrackedEffect / onSettled callbacks) get
   // committed visibility: like the effect half of createEffect and event
@@ -2113,6 +2124,7 @@ export function read<T>(el: Signal<T> | Computed<T>): T {
 
   let c = context;
   if ((c as Root)?._root) c = (c as Root)._parentComputed;
+  if (c !== null && c === probeObserver) return probeRead(el, c);
   const computed = el as Partial<Computed<unknown>>;
   const firewall = (el as FirewallSignal<any>)._firewall;
   const owner = firewall || el;
@@ -2528,7 +2540,190 @@ function captureWriteSnapshot<T>(el: Signal<T> | Computed<T>, current: T): void 
   snapshotSources!.add(el);
 }
 
+// MARK: static-binding probe
+
+/**
+ * The observer a static probe runs under (owner.ts `createProbeOwner`), or
+ * null. Anything that would make the pass depend on the graph — a child, a
+ * cleanup, a consumed id, a write, a link — throws `PROBE_ABORT` when it sees
+ * it; a tracked read is recorded instead (`probeRead`).
+ *
+ * @internal
+ */
+export let probeObserver: Owner | null = null;
+/** @internal */
+export const PROBE_ABORT = {};
+/** Returned by `probeStatic` when the pass needs a real render effect. @internal */
+export const NOT_STATIC = {};
+let probeReads: unknown[] | null = null;
+let probeAborted = false;
+// The probe's reads and value, followed by the owner it ran under, left for
+// the next effect created under that owner to adopt (effect.ts).
+let adoptable: unknown[] | null = null;
+
+/**
+ * A read under the probe: served untracked (the probe never subscribes) and
+ * recorded with its value when tracked, so the effect that replaces the probe
+ * can adopt it instead of running the pass again.
+ */
+function probeRead<T>(el: Signal<T> | Computed<T>, probe: Owner): T {
+  // A node with a staged, overridden, snapshotted, held or pending value is
+  // served by posture (stale reader, lane, transaction), which an
+  // observer-less read does not reproduce: leave it to a real effect.
+  const source = ((el as FirewallSignal<T>)._firewall || el) as Computed<T>;
+  if (
+    el._pendingValue !== NOT_PENDING ||
+    el._transition !== null ||
+    el._x?._overrideValue !== undefined ||
+    el._x?._snapshotValue !== undefined ||
+    snapshotCaptureActive ||
+    source._statusFlags & (STATUS_PENDING | STATUS_UNINITIALIZED)
+  )
+    throw PROBE_ABORT;
+  const probeTracking = tracking;
+  context = null;
+  tracking = false;
+  let value: T;
+  try {
+    const fast = readNodeFast(el as Signal<T>);
+    value = fast === READ_SLOW ? read(el) : (fast as T);
+  } finally {
+    context = probe;
+    tracking = probeTracking;
+  }
+  if (probeTracking) (probeReads ??= []).push(el, value);
+  return value;
+}
+
+/**
+ * Runs `fn` as a render effect's first pass would, under a throwaway observer,
+ * and returns its value when the pass can never re-run: it read nothing
+ * tracked and created nothing (no child, cleanup, consumed id, component or
+ * write). Otherwise returns `NOT_STATIC`; when the only reason is tracked
+ * reads, they are left for the effect created next under the same owner to
+ * adopt (`takeAdoptable`), so the pass does not run twice.
+ *
+ * A non-transparent binding consumes the child id its effect would have, so
+ * every later hydration key is unchanged; `acceptId(id)` may refuse it.
+ *
+ * @internal
+ */
+export function probeStatic<T>(
+  fn: (prev: undefined) => T,
+  transparent: boolean,
+  acceptId?: (id: string) => boolean
+): T | typeof NOT_STATIC {
+  adoptable = null;
+  const owner = context;
+  // Under any live transaction a pass's reads are served by posture (staged,
+  // held, lane values) that the probe does not reproduce: no elision.
+  if (
+    owner === null ||
+    transitions.size !== 0 ||
+    activeTransition !== null ||
+    currentOptimisticLane !== null ||
+    latestReadActive ||
+    pendingCheckActive
+  )
+    return NOT_STATIC;
+  const prevTracking = tracking,
+    prevProbe = probeObserver,
+    prevStrictRead = strictRead,
+    prevReads = probeReads,
+    prevAborted = probeAborted;
+  let value: T | typeof NOT_STATIC;
+  let adopt: unknown[] | null = null;
+  probeReads = null;
+  probeAborted = false;
+  // As recompute does: a component body's strict-read scope does not reach
+  // into a binding's pass.
+  strictRead = false;
+  probeObserver = context = createProbeOwner(owner);
+  tracking = true;
+  try {
+    value = fn(undefined);
+    // Re-read through a cast: TS narrowed both to their reset values above.
+    const reads = probeReads as unknown[] | null;
+    if (probeAborted as boolean) value = NOT_STATIC;
+    else if (reads !== null) {
+      adopt = reads;
+      adopt.push(value, owner);
+      value = NOT_STATIC;
+    }
+  } catch {
+    value = NOT_STATIC;
+  } finally {
+    probeObserver = prevProbe;
+    context = owner;
+    tracking = prevTracking;
+    strictRead = prevStrictRead;
+    probeReads = prevReads;
+    probeAborted = prevAborted;
+  }
+  // An async value is never static: the effect owns its pending state.
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    (typeof (value as any).then === "function" ||
+      typeof (value as any)[Symbol.asyncIterator] === "function")
+  )
+    return NOT_STATIC;
+  adoptable = adopt;
+  if (value !== NOT_STATIC && !transparent && owner.id != null) {
+    if (acceptId !== undefined && !acceptId(peekNextChildId(owner))) return NOT_STATIC;
+    getNextChildId(owner);
+  }
+  return value;
+}
+
+/** The probe's recorded reads for the effect about to replace it. @internal */
+export function takeAdoptable(): unknown[] | null {
+  const a = adoptable;
+  adoptable = null;
+  return a;
+}
+
+/**
+ * For a renderer primitive that would create a node or run user code (a
+ * component, a memo, a hydration claim): returns true under a probe and marks
+ * it not static, so the caller bails without doing the work. Flagging rather
+ * than throwing keeps the abort cheap.
+ *
+ * @internal
+ */
+export function probeAbort(): boolean {
+  if (probeObserver === null || context !== probeObserver) return false;
+  probeAborted = true;
+  return true;
+}
+
+// Binding sites: (component, binding index in its body). A site whose binding
+// was ever not static is not probed again — most sites are consistently one
+// or the other across instances.
+/** The component whose body is running, for binding-site counting. @internal */
+export let siteComp: unknown = null;
+/** The next binding index in `siteComp`'s body. @internal */
+export let siteNext = 0;
+const siteMap = new Map<unknown, boolean[]>();
+
+/** Enters (`setSite(Comp, 0)`) or restores a binding-site scope. @internal */
+export function setSite(comp: unknown, next: number): void {
+  siteComp = comp;
+  siteNext = next;
+}
+/** The next binding site in the current component body, or -1 outside one (or inside a pass). @internal */
+export function bindingSite(): number {
+  return siteComp === null || tracking ? -1 : siteNext++;
+}
+/** The current component's per-site "was not static" flags. @internal */
+export function siteFlags(): boolean[] {
+  let f = siteMap.get(siteComp);
+  if (f === undefined) siteMap.set(siteComp, (f = []));
+  return f;
+}
+
 export function setSignal<T>(el: Signal<T> | Computed<T>, v: T | ((prev: T) => T)): T {
+  if (probeObserver !== null && context === probeObserver) throw PROBE_ABORT;
   if (
     __DEV__ &&
     !(el._config & CONFIG_OWNED_WRITE) &&

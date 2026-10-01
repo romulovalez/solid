@@ -544,13 +544,15 @@ describe("r.insert caching", () => {
     });
     flush();
 
-    expect(accessorCalls).toBe(1);
+    // Twice on mount: the static-binding probe ran the accessor and gave up
+    // at the memo, then the real effect ran it.
+    expect(accessorCalls).toBe(2);
     expect(parent.innerHTML).toBe("0<span>static</span>");
 
     setCount(1);
     flush();
 
-    expect(accessorCalls).toBe(1);
+    expect(accessorCalls).toBe(2);
     expect(parent.innerHTML).toBe("1<span>static</span>");
   });
 
@@ -586,13 +588,15 @@ describe("r.insert caching", () => {
     });
     flush();
 
-    expect(accessorCalls).toBe(1);
+    // Twice on mount: the probe gave up at the inner effect the inline
+    // function needs, then the real effect ran the accessor.
+    expect(accessorCalls).toBe(2);
     expect(parent.innerHTML).toBe("yes<span>static</span>");
 
     setShow(false);
     flush();
 
-    expect(accessorCalls).toBe(1);
+    expect(accessorCalls).toBe(2);
     expect(parent.innerHTML).toBe("no<span>static</span>");
   });
 

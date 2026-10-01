@@ -3,6 +3,11 @@
  * argument on `effect`/`insert` and the trailing tag on `spread` land on the
  * render effect nodes the runtime creates, where the dev and observe tiers
  * read them as the node's label (`_name`).
+ *
+ * A binding's first pass runs under the static-binding probe (no node, no
+ * name), and a binding that reads nothing reactive never gets a node at all;
+ * so every binding here reads a signal, and names are collected from the
+ * passes after an update, which run on the nodes.
  */
 import { describe, expect, test } from "vitest";
 import { createRoot, createSignal, getOwner, flush } from "solid-js";
@@ -15,11 +20,12 @@ function ownerName(): string | undefined {
 describe("sourceNames.bindings at runtime", () => {
   test("effect carries the compiled name onto its node", () => {
     const seen: (string | undefined)[] = [];
+    const [count, setCount] = createSignal(1);
     createRoot(() => {
       effect(
         () => {
           seen.push(ownerName());
-          return 1;
+          return count();
         },
         () => {},
         { name: "span.textContent" }
@@ -27,11 +33,14 @@ describe("sourceNames.bindings at runtime", () => {
       effect(
         () => {
           seen.push(ownerName());
-          return 1;
+          return count();
         },
         () => {}
       );
     });
+    flush();
+    seen.length = 0;
+    setCount(2);
     flush();
     expect(seen).toEqual(["span.textContent", "effect"]);
   });
@@ -61,11 +70,14 @@ describe("sourceNames.bindings at runtime", () => {
     setCount(2);
     flush();
     expect(div.textContent).toBe("2");
+    // The outer pass that the probe ran (and abandoned) saw no name.
+    seen.delete(undefined);
     expect([...seen]).toEqual(["div.children"]);
   });
 
   test("spread labels its attribute effect `<tag>.spread` and its children insert `<tag>.children`", () => {
     const seen = new Set<string | undefined>();
+    const [title, setTitle] = createSignal("t");
     const section = document.createElement("section");
     createRoot(() => {
       spread(
@@ -73,10 +85,10 @@ describe("sourceNames.bindings at runtime", () => {
         () => {
           seen.add(ownerName());
           return {
-            title: "t",
+            title: title(),
             get children() {
               seen.add(ownerName());
-              return "kids";
+              return title() + "-kids";
             }
           };
         },
@@ -86,24 +98,31 @@ describe("sourceNames.bindings at runtime", () => {
       );
     });
     flush();
-    expect(section.getAttribute("title")).toBe("t");
-    expect(section.textContent).toBe("kids");
+    seen.clear();
+    setTitle("u");
+    flush();
+    expect(section.getAttribute("title")).toBe("u");
+    expect(section.textContent).toBe("u-kids");
     expect([...seen].sort()).toEqual(["section.children", "section.spread"]);
   });
 
   test("without a name, the runtime's defaults stand", () => {
     const seen = new Set<string | undefined>();
+    const [title, setTitle] = createSignal("t");
     const div = document.createElement("div");
     createRoot(() => {
       insert(div, () => {
         seen.add(ownerName());
-        return "x";
+        return title();
       });
       spread(div, () => {
         seen.add(ownerName());
-        return { title: "t" };
+        return { title: title() };
       });
     });
+    flush();
+    seen.clear();
+    setTitle("u");
     flush();
     expect([...seen]).toEqual(["effect"]);
   });
