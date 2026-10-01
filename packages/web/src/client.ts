@@ -21,6 +21,7 @@ import {
 } from "solid-js";
 import type { ClientErrorHook } from "solid-js";
 import {
+  probeAbort,
   sharedConfig,
   viewOf,
   OmitView,
@@ -34,7 +35,7 @@ import {
   SOURCE_PROXY,
   SOURCE_MEMO
 } from "solid-js/internal";
-import { effect, memo, setSpreadName, spreadName, tagElement } from "./render.js";
+import { effect, memo, renderEffect, setSpreadName, spreadName, tagElement } from "./render.js";
 
 import { JSX } from "../jsx/jsx.js";
 
@@ -375,7 +376,7 @@ export function render(code, element, init, options = {}) {
         if (options.onError) getOwner()[ROOT_ERROR_HOOK] = options.onError;
         if (element === document) {
           const tree = code();
-          effect(
+          renderEffect(
             () => flatten(tree),
             () => {}
           );
@@ -2004,7 +2005,7 @@ function gateHeadResource(props) {
     (attrs || (attrs = {}))[name] = v === true ? "" : String(v);
   }
   if (attrs) descriptor.attrs = attrs;
-  effect(
+  renderEffect(
     () => {
       const entry = warmAsset(descriptor);
       // Settledness is checked here, not inside the seam: a loaded (or
@@ -2051,7 +2052,7 @@ export function useHead(tags) {
   initHeadRegistry();
   const reg = { seq: -1, tags: null };
   const uid = ++headUid;
-  effect(
+  renderEffect(
     () => {
       let list = typeof tags === "function" ? tags() : tags;
       if (!Array.isArray(list)) list = [list];
@@ -2331,6 +2332,9 @@ export function getNextElement(template) {
   let node,
     key,
     hydrating = isHydrating();
+  // Under a static-binding probe a claim would consume a hydration key the
+  // real effect needs: abort the probe and hand it a throwaway clone.
+  if (hydrating && template && probeAbort()) return template(true);
   if (!hydrating || !(node = sharedConfig.registry.get((key = getHydrationKey())))) {
     if (!template) {
       throw new Error(`Hydration Mismatch. Unable to find DOM nodes for hydration key: ${key}`);

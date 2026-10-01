@@ -441,7 +441,12 @@ describe("pay-for-use tree-shaking (#2883)", () => {
     // 0 B core-retained (26,678). The slot arm rides the installed
     // `_landOnOverride` hook (no new static slot) and sheds with the engine;
     // `mapArray`'s per-pass writer pick sheds with map.
-    expect(minifiedBytes).toBeLessThan(26_690);
+    // Static-binding elision (RFC, 2026-10-01): +896 B core-retained
+    // (26,678 -> 27,574) — `probeStatic` and its probe owner, the probe
+    // guards in link/linkChild/childId/cleanup/setSignal/read, the effect's
+    // adoption of the probe's reads, and the binding-site table. Retained
+    // because `effect()` reaches the adoption path.
+    expect(minifiedBytes).toBeLessThan(27_590);
   });
 
   it("plain stores shed the verdict layer, affects, boundaries, and map", async () => {

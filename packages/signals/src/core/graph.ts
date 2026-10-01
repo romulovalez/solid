@@ -6,7 +6,7 @@ import {
   REACTIVE_ZOMBIE,
   STATUS_PENDING
 } from "./constants.js";
-import { slotUnobservedHook } from "./core.js";
+import { probeObserver, PROBE_ABORT, slotUnobservedHook } from "./core.js";
 import { deleteFromHeap, queueFor } from "./heap.js";
 import { disposeChildren } from "./owner.js";
 import { bumpNotifyEpoch, dirtyQueue, zombieQueue } from "./scheduler.js";
@@ -126,6 +126,9 @@ export function link(
   sub: Computed<any>,
   pendingObserver: boolean = false
 ) {
+  // A static probe never subscribes (its reads are recorded in read()); any
+  // other path that reaches here under it means the pass is not static.
+  if (sub === probeObserver) throw PROBE_ABORT;
   // Repeat touches within one pass AND-combine `_pendingObserver`: a probe
   // read (`isPending(() => x())`) beside a value read of the same dep must
   // not relabel the value dependency as probe-only — the value read is what

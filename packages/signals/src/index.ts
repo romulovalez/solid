@@ -33,6 +33,21 @@ export {
   ROOT_ERROR_HOOK
 } from "./core/index.js";
 /**
+ * @internal The static-binding probe seams (core.ts), for `solid-js`'s
+ * `createComponent` and `@solidjs/web`'s binding effects. Not public API.
+ */
+export {
+  NOT_STATIC,
+  probeStatic,
+  takeAdoptable,
+  probeAbort,
+  bindingSite,
+  siteFlags,
+  setSite,
+  siteComp,
+  siteNext
+} from "./core/index.js";
+/**
  * @internal The dev console footer seam — registered by `solid-js`, which
  * owns the repair skill the footer points at. Not part of `DEV`; a no-op
  * outside dev builds.

@@ -16,7 +16,16 @@ export {
   setSnapshotCapture,
   markSnapshotScope,
   releaseSnapshotScope,
-  clearSnapshots
+  clearSnapshots,
+  NOT_STATIC,
+  probeStatic,
+  takeAdoptable,
+  probeAbort,
+  bindingSite,
+  siteFlags,
+  setSite,
+  siteComp,
+  siteNext
 } from "./core.js";
 export {
   enableExternalSource,
