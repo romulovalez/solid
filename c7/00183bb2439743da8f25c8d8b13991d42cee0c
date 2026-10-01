@@ -1,0 +1,25 @@
+packages/web/test/server/root-hole-boundary-resolve.spec.tsx
+  s_b15c8bc521b310::t_0e4e9c74f6083b 1-69,73-76,81-83
+  s_b15c8bc521b310::t_815189ff78a03b 70-72
+  s_b15c8bc521b310::t_1e5ce09ce4f1c1 77-80,84-85
+.changeset/web-flush-end-root-holes.md
+  s_b15c8bc521b310::t_3746a3c5a6a253 1-5
+packages/web/src/server.ts
+  s_b15c8bc521b310::t_dd25f3e9678465 2386-2395
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c700183bb2439743da8f25c8d8b13991d42cee0c",
+  "prompts": {},
+  "sessions": {
+    "s_b15c8bc521b310": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "23863e94-2871-46ba-b352-c8c7cd177ed3",
+        "model": "unknown"
+      },
+      "human_author": "Rómulo Ochoa Valez <romulovalez@gmail.com>"
+    }
+  }
+}
