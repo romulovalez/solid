@@ -2613,6 +2613,9 @@ export function renderToStream(code, options = {}) {
     return keys;
   }
   let rootHoles = null;
+  // Resolved boundary content whose placeholder was not in `html` yet because
+  // it sits inside a pending root hole; spliced once the hole lands.
+  let heldFragments = null;
   let nextHoleId = 0;
   let buffer = {
     write(payload) {
@@ -2853,7 +2856,19 @@ export function renderToStream(code, options = {}) {
               // Head registrations stay pending: a boundary that inlines into
               // the shell commits with the shell flush (its key is no longer
               // a pending fragment, so renderShellHead picks them up).
-              queue(() => (html = replacePlaceholder(html, key, value !== undefined ? value : "")));
+              //
+              // While a root hole is pending, the placeholder may be inside
+              // it rather than in `html` (an error boundary flattens its
+              // subtree and rethrows a pending hole as one NotReadyError).
+              // replacePlaceholder misses silently there, and the fallback
+              // the hole later writes would never be replaced: hold the
+              // content until resolveRootHoles() splices the hole in.
+              queue(() => {
+                const content = value !== undefined ? value : "";
+                const spliced = replacePlaceholder(html, key, content);
+                if (spliced === html && rootHoles) (heldFragments ||= new Map()).set(key, content);
+                else html = spliced;
+              });
               serializeFragmentAssets(key, tracking.boundaryModules, context);
               item.resolve(error);
             } else {
@@ -2975,6 +2990,15 @@ export function renderToStream(code, options = {}) {
         }
         html = html.replace(marker, out);
         for (const p of res.p) blockingPromises.add(p);
+      }
+    }
+    if (heldFragments) {
+      for (const [key, content] of heldFragments) {
+        const spliced = replacePlaceholder(html, key, content);
+        if (spliced !== html) {
+          html = spliced;
+          heldFragments.delete(key);
+        }
       }
     }
     if (pending.length) {

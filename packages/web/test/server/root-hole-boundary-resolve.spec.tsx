@@ -34,6 +34,20 @@ function renderComplete(code: () => any): Promise<string> {
   });
 }
 
+function pipeComplete(code: () => any): Promise<string> {
+  return new Promise(resolve => {
+    let html = "";
+    renderToStream(code).pipe({
+      write(chunk: string) {
+        html += chunk;
+      },
+      end() {
+        resolve(html);
+      }
+    });
+  });
+}
+
 describe("a boundary resolving inside an unresolved root hole", () => {
   test("does not finalize the render before the root hole lands", async () => {
     const html = await renderComplete(() => {
@@ -81,5 +95,33 @@ describe("a boundary resolving inside an unresolved root hole", () => {
     expect(html).not.toContain("ERRORED");
     // The render is over: a macrotask gets to run again.
     await wait(10);
+  });
+
+  test.each([
+    ["awaited", renderComplete],
+    ["piped", pipeComplete]
+  ])("ships the boundary's content, not its fallback (%s)", async (_, render) => {
+    // The boundary's placeholder is inside the root hole when it resolves, so
+    // the splice into the shell html misses; the content must be held and
+    // spliced once the hole lands, or the document keeps the fallback and the
+    // client finds an empty `pl-` template and rebuilds the subtree.
+    const html = await render(() => {
+      const fast = asyncRead(5, "FAST-CONTENT");
+      const slow = asyncRead(40, "SLOW-CONTENT");
+      return (
+        <Errored fallback="ERRORED">
+          <main>
+            <Loading fallback="FALLBACK">
+              <section>{fast()}</section>
+            </Loading>
+            <aside>{slow()}</aside>
+          </main>
+        </Errored>
+      );
+    });
+    expect(html).toMatch(/<section[^>]*>FAST-CONTENT<\/section>/);
+    expect(html).toMatch(/<aside[^>]*>SLOW-CONTENT<\/aside>/);
+    expect(html).not.toContain('<template id="pl-');
+    expect(html).not.toContain("FALLBACK");
   });
 });
